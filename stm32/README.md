@@ -1,0 +1,8 @@
+# STM32F103C8T6 UART Recovery candidate
+For genuine STM32F103C8T6 (64 KiB Flash, 20 KiB SRAM) only. Not a replacement for the factory ROM. Primary install: SWD, backup and full erase with explicit confirmation; do not modify option bytes. PA9 TX, PA10 RX, GND, 3.3 V logic; PB12 held low during hardware reset enters loader, release before reboot. On an invalid application always enters loader. UART 115200 8N1 from reset HSI. No authentication or signature: physical trusted connection only. Single-slot, no rollback; interrupted update remains recoverable via loader.
+
+Memory: loader 0x08000000–0x08003fff, app 0x08004000–0x0800fbff (47 KiB), commit record page 0x0800fc00–0x0800ffff. App must be linked for the app address, vector table located there, SystemInit must set VTOR to 0x08004000 (not reset it to 0x08000000). Do not write loader/metadata from application. Example application linker included, adapt to actual startup. Builder v0.2.6 does not yet configure this automatically. Never upload an ordinary base-address BIN.
+
+Protocol: I (0x49) returns ACK 0x79 + FS10 + little-endian app base and max size. B + uint32 length + uint32 CRC32 (IEEE) erases commit page then app pages, ACK/NACK (0x1f). D + uint32 chunk length (1..256, even except final) + bytes; wait ACK for each chunk. C validates CRC and vectors and commits marker last. R resets if committed app valid, X aborts. No pipelining; reset to resynchronize after malformed frames. No auto-install until hardware test, including power interruptions. CRC is corruption detection, not authentication.
+
+References: https://www.st.com/resource/en/datasheet/stm32f103c8.pdf ; RM0008, PM0075 (ST). Source Apache-2.0. Local compilation is not a physical test.

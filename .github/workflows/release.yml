@@ -1,0 +1,45 @@
+name: Build and publish reviewed STM32 candidate
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bootloaders-public-release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: python -m unittest discover -s tests -v
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi
+          bash stm32/build.sh
+          python tools/package_stm32.py stm32/build/bootloader.bin out "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v6
+        with: {name: reviewed-stm32, path: out/, if-no-files-found: error}
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with: {name: reviewed-stm32, path: out}
+      - name: Publish new candidate without overwriting existing releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          VERSION=$(python -c 'import json; print(json.load(open("out/catalog.json"))["version"])')
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Version already exists; no files replaced."
+            exit 0
+          fi
+          gh release create "v$VERSION" --prerelease --target "$GITHUB_SHA" --title "STM32 FS10 Recovery v$VERSION candidate" --notes "Apache-2.0. Source at this tag. CI-generated; not hardware-tested. Explicit install only; STM32F103C8T6 only." out/catalog.json out/stm32f103c8-uart-recovery-"$VERSION".zip
