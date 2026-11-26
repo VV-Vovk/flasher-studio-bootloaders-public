@@ -1,0 +1,8 @@
+menu "Flasher Recovery"
+config FS_WIFI
+    bool "Wi-Fi transport"
+    default y
+config FS_BLE
+    bool "BLE transport"
+    default n
+endmenu

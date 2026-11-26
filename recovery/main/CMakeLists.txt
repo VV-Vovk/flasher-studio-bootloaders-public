@@ -1,0 +1,8 @@
+set(deps app_update nvs_flash mbedtls esp_timer bootloader_support esp_hw_support)
+if(NOT IDF_TARGET STREQUAL "esp32h2")
+  list(APPEND deps esp_wifi esp_event esp_netif esp_http_server)
+endif()
+if(NOT IDF_TARGET STREQUAL "esp32s2")
+  list(APPEND deps bt)
+endif()
+idf_component_register(SRCS "recovery.c" INCLUDE_DIRS "." REQUIRES ${deps})
