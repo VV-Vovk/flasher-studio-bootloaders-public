@@ -1,0 +1,66 @@
+name: ESP32-C3 private-build pipeline verification (no published binaries)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-private-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch pinned public first-party source and build privately
+        env:
+          RID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          TARGET: esp32c3
+          RADIO: wifi-ble
+          FLASH: '4'
+          GPIO: '5'
+          HOLD: '0'
+          SOURCE_REF: ffd278c096256906119b27b604dfcc0b4087cb76
+          IMAGE: espressif/idf@sha256:4317595a911886e04cbc6d731315d5fc2918e510b6733fc7d03381ab2d270082
+        run: |
+          set -euo pipefail
+          [[ "$RID" =~ ^[0-9a-f]{32}$ && "$TARGET" == esp32c3 && "$RADIO" =~ ^(wifi|ble|wifi-ble)$ && "$FLASH" =~ ^(4|8|16)$ && "$GPIO" =~ ^(3|4|5|6|7|10)$ && "$HOLD" =~ ^[0-5]$ ]]
+          WORK="$RUNNER_TEMP/recovery-src"
+          git init "$WORK"
+          git -C "$WORK" fetch --depth=1 https://github.com/VV-Vovk/flasher-studio-bootloaders-public.git "$SOURCE_REF"
+          git -C "$WORK" checkout --detach FETCH_HEAD
+          test "$(git -C "$WORK" rev-parse HEAD)" = "$SOURCE_REF"
+          cd "$WORK"
+          python -m unittest discover -s tests -p test_local_esp.py -v
+          python tools/esp_profiles.py prepare "$TARGET" "$RADIO" "$FLASH" "$GPIO" "$HOLD"
+          docker pull "$IMAGE"
+          docker run --rm -v "$WORK:/project" -w /project/recovery -e TARGET -e RADIO -e FLASH -e GPIO -e HOLD -e SOURCE_REF "$IMAGE" bash -ec '
+            idf.py -DIDF_TARGET="$TARGET" -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.transport" build
+            python /project/tools/audit_esp.py
+            python -m venv /tmp/fs-sbom
+            /tmp/fs-sbom/bin/pip install --disable-pip-version-check esp-idf-sbom==1.3.1
+            /tmp/fs-sbom/bin/esp-idf-sbom create --file-tags -o /project/audit/application.spdx build/project_description.json
+            python /project/tools/collect_esp_notices.py
+            python /project/tools/notice_bundle.py /project/audit "$IDF_PATH" /project/THIRD_PARTY_NOTICES.txt
+            python /project/tools/local_esp_package.py /project/recovery/build "$RADIO" "$FLASH" "$GPIO" "$HOLD" /project/out /project/THIRD_PARTY_NOTICES.txt "$SOURCE_REF"
+          '
+          sudo chown -R "$(id -u):$(id -g)" "$WORK/out"
+          mkdir "$RUNNER_TEMP/recovery-output"
+          cp "$WORK/out/catalog.json" "$WORK/out/"*.zip "$RUNNER_TEMP/recovery-output/"
+      - name: Check final private candidate structure, never upload firmware
+        run: |
+          python - <<'PY'
+          import hashlib,json,os,pathlib,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'recovery-output'
+          c=json.loads((root/'catalog.json').read_text())
+          p=c['packages'][0];m=p['manifest']
+          assert c['releaseState']=='local-only-review-hold' and len(c['packages'])==1
+          assert m['target']['holdSeconds']==0 and m['target']['activationGpio']==5
+          b=(root/p['package']['file']).read_bytes()
+          assert hashlib.sha256(b).hexdigest()==p['package']['sha256']
+          with zipfile.ZipFile(root/p['package']['file']) as z:
+              assert json.loads(z.read('manifest.json'))==m
+              assert b'LOCAL TEST ONLY' in z.read('THIRD_PARTY_NOTICES.txt')
+              assert z.testzip() is None
+          print('Complete package built and verified in runner; no firmware upload or release.')
+          PY
