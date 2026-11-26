@@ -2,6 +2,12 @@ name: Build and publish reviewed STM32 candidate
 on:
   push:
     branches: [main]
+    paths:
+      - 'stm32/**'
+      - 'tools/package_stm32.py'
+      - 'tests/test_package.py'
+      - 'LICENSE'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 permissions:
   contents: read
