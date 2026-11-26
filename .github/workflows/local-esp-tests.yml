@@ -1,0 +1,22 @@
+name: ESP local build tooling tests
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/local_esp_package.py'
+      - 'tools/build_esp_local.sh'
+      - 'tools/notice_bundle.py'
+      - 'tools/esp_profiles.py'
+      - 'tests/test_local_esp.py'
+      - '.github/workflows/local-esp-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: python -m unittest discover -s tests -p 'test_local_esp.py' -v
+      - run: bash -n tools/build_esp_local.sh
